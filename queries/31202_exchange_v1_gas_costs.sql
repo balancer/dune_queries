@@ -1,0 +1,18 @@
+WITH prices AS (
+    SELECT date_trunc('day', minute) AS day, AVG(price) AS price 
+    FROM prices.layer1_usd_eth
+    GROUP BY 1
+)
+
+SELECT date_trunc('day', s.block_time) AS day,
+        MIN(t.gas_price * t.gas_used * 1e-18 * p.price) AS "Min",
+        MAX(t.gas_price * t.gas_used * 1e-18 * p.price) AS "Max",
+       AVG(t.gas_price * t.gas_used * 1e-18 * p.price) AS "Avg"
+FROM dex.trades s
+LEFT JOIN ethereum."transactions" t ON t.hash = s.tx_hash AND t.block_time > now() - interval '14d'
+LEFT JOIN prices p ON p.day = date_trunc('day', s.block_time)
+WHERE s.block_time > now() - interval '14d'
+AND t.to = '\x3E66B66Fd1d0b02fDa6C811Da9E0547970DB2f21'
+AND project = 'Balancer'
+AND version = '1'
+GROUP BY 1
