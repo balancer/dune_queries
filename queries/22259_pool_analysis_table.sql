@@ -325,6 +325,7 @@ SELECT
   COALESCE(amount, 0) AS amount,
   t.tvl,
   s.volume,
+  s.volume / t.tvl AS utilization_ratio,
   s.revenues,
   t.tvl / r.usd_amount AS tvl_ratio,
   s.volume / r.usd_amount AS volume_ratio,

@@ -1,56 +1,91 @@
 WITH prices AS (
-        SELECT date_trunc('day', minute) AS day, contract_address AS token, AVG(price) AS price
-        FROM prices.usd
-        WHERE minute > '2021-04-20'
-        GROUP BY 1, 2
-    ),
-    
-    dex_prices_1 AS (
-        SELECT date_trunc('day', hour) AS day, 
-        contract_address AS token, 
-        (PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY median_price)) AS price,
-        SUM(sample_size) as sample_size
-        FROM dex.view_token_prices
-        WHERE hour > '2021-04-20'
-        GROUP BY 1, 2
-        HAVING sum(sample_size) > 3
-    ),
-    
-    dex_prices AS (
-        SELECT *, LEAD(day, 1, now()) OVER (PARTITION BY token ORDER BY day) AS day_of_next_change
-        FROM dex_prices_1
-    ),
-
-    swaps AS (
-        SELECT 
-            block_time,
-            SUBSTRING(exchange_contract_address::text, 0, 43)::bytea AS pool,
-            token_b_address,
-            token_b_amount,
-            COALESCE(s1."swapFeePercentage", s2."swapFeePercentage")/1e18 AS swap_fee
-        FROM dex.trades t  
+    SELECT
+        date_trunc('day', MINUTE) AS DAY,
+        contract_address AS token,
+        AVG(price) AS price
+    FROM
+        prices.usd
+    WHERE
+        MINUTE > '2021-04-20'
+    GROUP BY
+        1,
+        2
+),
+dex_prices_1 AS (
+    SELECT
+        date_trunc('day', HOUR) AS DAY,
+        contract_address AS token,
+        (
+            PERCENTILE_DISC(0.5) WITHIN GROUP (
+                ORDER BY
+                    median_price
+            )
+        ) AS price,
+        SUM(sample_size) AS sample_size
+    FROM
+        dex.view_token_prices
+    WHERE
+        HOUR > '2021-04-20'
+    GROUP BY
+        1,
+        2
+    HAVING
+        sum(sample_size) > 3
+),
+dex_prices AS (
+    SELECT
+        *,
+        LEAD(DAY, 1, NOW()) OVER (
+            PARTITION BY token
+            ORDER BY
+                DAY
+        ) AS day_of_next_change
+    FROM
+        dex_prices_1
+),
+swaps AS (
+    SELECT
+        block_time,
+        SUBSTRING(exchange_contract_address :: text, 0, 43) :: bytea AS pool,
+        token_b_address,
+        token_b_amount,
+        COALESCE(s1."swapFeePercentage", s2."swapFeePercentage") / 1e18 AS swap_fee
+    FROM
+        dex.trades t
         LEFT JOIN balancer_v2."WeightedPool_evt_SwapFeePercentageChanged" s1 ON s1.contract_address = SUBSTRING(exchange_contract_address, 0, 21)
         AND s1.evt_block_time = (
-            SELECT MAX(evt_block_time)
-            FROM balancer_v2."WeightedPool_evt_SwapFeePercentageChanged"
-            WHERE evt_block_time <= t.block_time
-            AND contract_address = SUBSTRING(exchange_contract_address, 0, 21)
+            SELECT
+                MAX(evt_block_time)
+            FROM
+                balancer_v2."WeightedPool_evt_SwapFeePercentageChanged"
+            WHERE
+                evt_block_time <= t.block_time
+                AND contract_address = SUBSTRING(exchange_contract_address, 0, 21)
         )
         LEFT JOIN balancer_v2."StablePool_evt_SwapFeePercentageChanged" s2 ON s2.contract_address = SUBSTRING(exchange_contract_address, 0, 21)
         AND s2.evt_block_time = (
-            SELECT MAX(evt_block_time)
-            FROM balancer_v2."StablePool_evt_SwapFeePercentageChanged"
-            WHERE evt_block_time <= t.block_time
-            AND contract_address = SUBSTRING(exchange_contract_address, 0, 21))
-        WHERE project = 'Balancer'
+            SELECT
+                MAX(evt_block_time)
+            FROM
+                balancer_v2."StablePool_evt_SwapFeePercentageChanged"
+            WHERE
+                evt_block_time <= t.block_time
+                AND contract_address = SUBSTRING(exchange_contract_address, 0, 21)
+        )
+    WHERE
+        project = 'Balancer'
         AND version = '2'
-        AND ('{{1. Pool ID}}' = 'All'
-        OR REGEXP_REPLACE('{{1. Pool ID}}', '^.', '\')::bytea = exchange_contract_address)
+        AND (
+            '{{1. Pool ID}}' = 'All'
+            OR REGEXP_REPLACE(
+                '{{1. Pool ID}}',
+                '^.',
+                '\')::bytea = exchange_contract_address)
     ),
     
     token_revenues AS (
         SELECT
-            date_trunc('day', block_time) AS day,
+            date_trunc(' DAY ', block_time) AS day,
             pool,
             token_b_address,
             SUM(token_b_amount * swap_fee) AS revenues
@@ -69,34 +104,34 @@ WITH prices AS (
     ),
     
     weekly_revenues AS (
-        SELECT date_trunc('week', day) AS week, AVG(revenues) AS revenues
+        SELECT date_trunc(' week ', day) AS week, AVG(revenues) AS revenues
         FROM revenues
         GROUP BY 1
     ),
     
     swaps_changes AS (
         SELECT day, pool, token, SUM(COALESCE(delta, 0)) AS delta FROM (
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, "tokenIn" AS token, "amountIn" AS delta
+        SELECT date_trunc(' DAY ', evt_block_time) AS day, "poolId" AS pool, "tokenIn" AS token, "amountIn" AS delta
         FROM balancer_v2."Vault_evt_Swap"
         UNION ALL
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, "tokenOut" AS token, -"amountOut" AS delta
+        SELECT date_trunc(' DAY ', evt_block_time) AS day, "poolId" AS pool, "tokenOut" AS token, -"amountOut" AS delta
         FROM balancer_v2."Vault_evt_Swap") swaps
         GROUP BY 1, 2, 3
     ),
     
     internal_changes AS (
-        SELECT date_trunc('day', evt_block_time) AS day, '\xBA12222222228d8Ba445958a75a0704d566BF2C8'::bytea AS pool, token, SUM(COALESCE(delta, 0)) AS delta 
+        SELECT date_trunc(' DAY ', evt_block_time) AS day, ' \ xBA12222222228d8Ba445958a75a0704d566BF2C8 '::bytea AS pool, token, SUM(COALESCE(delta, 0)) AS delta 
         FROM balancer_v2."Vault_evt_InternalBalanceChanged"
         GROUP BY 1, 2, 3
     ),
     
     balances_changes AS (
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, UNNEST(tokens) AS token, UNNEST(deltas) AS delta 
+        SELECT date_trunc(' DAY ', evt_block_time) AS day, "poolId" AS pool, UNNEST(tokens) AS token, UNNEST(deltas) AS delta 
         FROM balancer_v2."Vault_evt_PoolBalanceChanged"
     ),
     
     managed_changes AS (
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, token, "managedDelta" AS delta
+        SELECT date_trunc(' DAY ', evt_block_time) AS day, "poolId" AS pool, token, "managedDelta" AS delta
         FROM balancer_v2."Vault_evt_PoolBalanceManaged"
     ),
     
@@ -116,8 +151,8 @@ WITH prices AS (
             SELECT day, pool, token, delta AS amount 
             FROM managed_changes
             ) balance
-        WHERE ('{{1. Pool ID}}' = 'All' OR
-        pool = CONCAT('\', SUBSTRING('{{1. Pool ID}}', 2))::bytea)
+        WHERE (' { { 1.Pool ID } } ' = ' ALL ' OR
+        pool = CONCAT(' \ ', SUBSTRING(' { { 1.Pool ID } } ', 2))::bytea)
         GROUP BY 1, 2, 3
     ),
     
@@ -140,7 +175,7 @@ WITH prices AS (
     ),
     
     calendar AS (
-        SELECT generate_series('2021-04-21'::timestamp, CURRENT_DATE, '1 day'::interval) AS day
+        SELECT generate_series(' 2021 -04 -21 '::timestamp, CURRENT_DATE, ' 1 DAY '::interval) AS day
     ),
     
     cumulative_usd_balance AS (
@@ -163,7 +198,7 @@ WITH prices AS (
     ),
 
     total_tvl AS (
-        SELECT date_trunc('week', day) AS week, AVG(liquidity) AS tvl
+        SELECT date_trunc(' week ', day) AS week, AVG(liquidity) AS tvl
         FROM estimated_pool_liquidity
         GROUP BY 1
     )
@@ -175,5 +210,6 @@ SELECT
     52*(revenues/tvl) AS apr
 FROM weekly_revenues r
 JOIN total_tvl t ON t.week = r.week
-WHERE t.week >= '{{2. Start date}}'
-AND t.week <= '{{3. End date}}'
+WHERE t.week >= ' { { 2.START date } } '
+AND t.week <= ' { { 3.
+            END date } } '

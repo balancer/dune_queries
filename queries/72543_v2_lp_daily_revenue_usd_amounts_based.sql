@@ -1,47 +1,106 @@
 WITH labels AS (
-        SELECT * FROM (SELECT
-            address,
-            name,
-            ROW_NUMBER() OVER (PARTITION BY address ORDER BY MAX(updated_at) DESC) AS num
-        FROM labels.labels
-        WHERE "type" = 'balancer_v2_pool'
-        GROUP BY 1, 2) l
-        WHERE num = 1
-    ), 
-    
-    transfers AS (
-        SELECT * FROM balancer_v2."WeightedPool_evt_Transfer"
-        WHERE evt_block_time <= '{{4. End date}}'
-        UNION ALL
-        SELECT * FROM balancer_v2."StablePool_evt_Transfer"
-        WHERE evt_block_time <= '{{4. End date}}'
-    ),
-    
-    joins AS (
-        SELECT date_trunc('day', e.evt_block_time) AS day, "to" AS lp, contract_address AS pool, SUM(value)/1e18 AS amount
-        FROM transfers e
-        WHERE "from" IN ('\xBA12222222228d8Ba445958a75a0704d566BF2C8',
-                        '\x0000000000000000000000000000000000000000')
-        GROUP BY 1, 2, 3
-    ),
-    
-    exits AS (
-        SELECT date_trunc('day', e.evt_block_time) AS day, "from" AS lp, contract_address AS pool, -SUM(value)/1e18 AS amount
-        FROM transfers e
-        WHERE "to" IN ('\xBA12222222228d8Ba445958a75a0704d566BF2C8',
-                        '\x0000000000000000000000000000000000000000')
-        GROUP BY 1, 2, 3
-    ),
-    
-    daily_delta_bpt_by_pool AS (
-        SELECT day, lp, pool, SUM(COALESCE(amount, 0)) as amount FROM 
-        (SELECT *
-        FROM joins j 
-        UNION ALL
-        SELECT * 
-        FROM exits e) foo
-        WHERE ('{{2. Pool ID}}' = 'All'
-        OR SUBSTRING(REGEXP_REPLACE('{{2. Pool ID}}', '^.', '\'),0, 43)::bytea = pool)
+    SELECT
+        *
+    FROM
+        (
+            SELECT
+                address,
+                name,
+                ROW_NUMBER() OVER (
+                    PARTITION BY address
+                    ORDER BY
+                        MAX(updated_at) DESC
+                ) AS num
+            FROM
+                labels.labels
+            WHERE
+                "type" = 'balancer_v2_pool'
+            GROUP BY
+                1,
+                2
+        ) l
+    WHERE
+        num = 1
+),
+transfers AS (
+    SELECT
+        *
+    FROM
+        balancer_v2."WeightedPool_evt_Transfer"
+    WHERE
+        evt_block_time <= '{{4. End date}}'
+    UNION
+    ALL
+    SELECT
+        *
+    FROM
+        balancer_v2."StablePool_evt_Transfer"
+    WHERE
+        evt_block_time <= '{{4. End date}}'
+),
+joins AS (
+    SELECT
+        date_trunc('day', e.evt_block_time) AS DAY,
+        "to" AS lp,
+        contract_address AS pool,
+        SUM(value) / 1e18 AS amount
+    FROM
+        transfers e
+    WHERE
+        "from" IN (
+            '\xBA12222222228d8Ba445958a75a0704d566BF2C8',
+            '\x0000000000000000000000000000000000000000'
+        )
+    GROUP BY
+        1,
+        2,
+        3
+),
+exits AS (
+    SELECT
+        date_trunc('day', e.evt_block_time) AS DAY,
+        "from" AS lp,
+        contract_address AS pool,
+        - SUM(value) / 1e18 AS amount
+    FROM
+        transfers e
+    WHERE
+        "to" IN (
+            '\xBA12222222228d8Ba445958a75a0704d566BF2C8',
+            '\x0000000000000000000000000000000000000000'
+        )
+    GROUP BY
+        1,
+        2,
+        3
+),
+daily_delta_bpt_by_pool AS (
+    SELECT
+        DAY,
+        lp,
+        pool,
+        SUM(COALESCE(amount, 0)) AS amount
+    FROM
+        (
+            SELECT
+                *
+            FROM
+                joins j
+            UNION
+            ALL
+            SELECT
+                *
+            FROM
+                exits e
+        ) foo
+    WHERE
+        (
+            '{{2. Pool ID}}' = 'All'
+            OR SUBSTRING(
+                REGEXP_REPLACE(
+                    '{{2. Pool ID}}',
+                    '^.',
+                    '\'),0, 43)::bytea = pool)
         GROUP BY 1, 2, 3
     ),
     
@@ -57,7 +116,7 @@ WITH labels AS (
     ),
     
     calendar AS (
-       SELECT generate_series(MIN(day), CURRENT_DATE, '1 day'::interval) AS day
+       SELECT generate_series(MIN(day), CURRENT_DATE, ' 1 DAY '::interval) AS day
        FROM cumulative_bpt_by_pool
     ),
     
@@ -100,16 +159,17 @@ WITH labels AS (
             WHERE evt_block_time <= t.block_time
             AND contract_address = SUBSTRING(exchange_contract_address, 0, 21)
         )
-        WHERE project = 'Balancer'
-        AND block_time <= '{{4. End date}}'
-        AND version = '2'
-        AND ('{{2. Pool ID}}' = 'All'
-        OR SUBSTRING(REGEXP_REPLACE('{{2. Pool ID}}', '^.', '\')::bytea, 0, 21) = SUBSTRING(exchange_contract_address, 0, 21))
+        WHERE project = ' Balancer '
+        AND block_time <= ' { { 4.
+                END date } } '
+        AND version = ' 2 '
+        AND (' { { 2.Pool ID } } ' = ' ALL '
+        OR SUBSTRING(REGEXP_REPLACE(' { { 2.Pool ID } } ', ' ^.', ' \ ')::bytea, 0, 21) = SUBSTRING(exchange_contract_address, 0, 21))
     ),
     
     revenues AS (
         SELECT
-            date_trunc('day', block_time) AS day,
+            date_trunc(' DAY ', block_time) AS day,
             pool,
             SUM(usd_amount) AS volume,
             SUM(usd_amount * swap_fee) AS revenues
@@ -121,7 +181,7 @@ WITH labels AS (
         SELECT 
             s.day, 
             s.pool,
-            CONCAT(SUBSTRING(UPPER(name), 0, 15), ' (', SUBSTRING(s.pool, 0, 8), ')') AS label,
+            CONCAT(SUBSTRING(UPPER(name), 0, 15), ' (', SUBSTRING(s.pool, 0, 8), ') ') AS label,
             lp,
             volume,
             (revenues * share) AS revenues
@@ -138,9 +198,10 @@ WITH labels AS (
             SUM(revenues) AS revenues,
             SUM(SUM(revenues)) OVER (ORDER BY day) AS cumulative_revenues
         FROM lp_revenues
-        WHERE ('{{1. LP address}}' = 'All'
-        OR REGEXP_REPLACE('{{1. LP address}}', '^.', '\')::bytea = lp)
+        WHERE (' { { 1.LP address } } ' = ' ALL '
+        OR REGEXP_REPLACE(' { { 1.LP address } } ', ' ^.', ' \ ')::bytea = lp)
         GROUP BY 1
     )
 
-SELECT * FROM cumulative_revenues WHERE day >= '{{3. Start date}}' AND day <= '{{4. End date}}'
+SELECT * FROM cumulative_revenues WHERE day >= ' { { 3.START date } } ' AND day <= ' { { 4.
+            END date } } '

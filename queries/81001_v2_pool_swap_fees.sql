@@ -1,19 +1,23 @@
 WITH swap_fees AS (
     SELECT
-        date_trunc('minute', evt_block_time) AS minute,
-        "swapFeePercentage"/1e18 AS swap_fee,
+        date_trunc('minute', evt_block_time) AS MINUTE,
+        "swapFeePercentage" / 1e18 AS swap_fee,
         contract_address AS pool
-    FROM balancer_v2."WeightedPool_evt_SwapFeePercentageChanged"
-    WHERE contract_address = SUBSTRING(CONCAT('\', SUBSTRING('{{1. Pool ID}}', 2))::bytea, 0, 21)
+    FROM
+        balancer_v2."WeightedPool_evt_SwapFeePercentageChanged"
+    WHERE
+        contract_address = SUBSTRING(
+            CONCAT(
+                '\', SUBSTRING(' { { 1.Pool ID } } ', 2))::bytea, 0, 21)
     
     UNION ALL
     
     SELECT
-        date_trunc('minute', evt_block_time) AS minute,
+        date_trunc(' MINUTE ', evt_block_time) AS minute,
         "swapFeePercentage"/1e18 AS swap_fee,
         contract_address AS pool
     FROM balancer_v2."StablePool_evt_SwapFeePercentageChanged"
-    WHERE contract_address = SUBSTRING(CONCAT('\', SUBSTRING('{{1. Pool ID}}', 2))::bytea, 0, 21)
+    WHERE contract_address = SUBSTRING(CONCAT(' \ ', SUBSTRING(' { { 1.Pool ID } } ', 2))::bytea, 0, 21)
 ),
 
 swap_fee_with_gaps AS(
@@ -26,7 +30,7 @@ swap_fee_with_gaps AS(
 ),
 
 calendar AS (
-    SELECT generate_series(MIN(minute), now(), interval '1 minute') AS minute
+    SELECT generate_series(MIN(minute), now(), interval ' 1 MINUTE ') AS minute
     FROM swap_fees
 )
 
@@ -34,4 +38,5 @@ SELECT
     c.minute, swap_fee, pool
 FROM calendar c
 LEFT JOIN swap_fee_with_gaps f ON f.minute <= c.minute AND c.minute < f.next_minute
-WHERE c.minute >= '{{2. Start date}}' AND c.minute <= '{{3. End date}}'
+WHERE c.minute >= ' { { 2.START date } } ' AND c.minute <= ' { { 3.
+            END date } } '

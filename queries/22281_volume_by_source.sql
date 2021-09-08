@@ -1,17 +1,25 @@
 -- Volume (source breakdown) per week
 -- Visualization: bar chart (stacked)
-
 WITH swaps AS (
-        SELECT date_trunc('week', d.block_time) AS week,
-            tx_to AS channel,
-            COUNT(*) AS txns,
-            sum(usd_amount) AS volume
-        FROM dex.trades d
-        WHERE project = 'Balancer'
-        AND ('{{4. Version}}' = 'Both' OR version = SUBSTRING('{{4. Version}}', 2))
+    SELECT
+        date_trunc('week', d.block_time) AS week,
+        tx_to AS channel,
+        COUNT(*) AS txns,
+        sum(usd_amount) AS volume
+    FROM
+        dex.trades d
+    WHERE
+        project = 'Balancer'
+        AND (
+            '{{4. Version}}' = 'Both'
+            OR version = SUBSTRING('{{4. Version}}', 2)
+        )
         AND block_time >= '{{2. Start date}}'
         AND block_time <= '{{3. End date}}'
-        AND ('{{1. Pool ID}}' = 'All' OR exchange_contract_address = CONCAT('\', SUBSTRING('{{1. Pool ID}}', 2))::bytea)
+        AND (
+            '{{1. Pool ID}}' = 'All'
+            OR exchange_contract_address = CONCAT(
+                '\', SUBSTRING(' { { 1.Pool ID } } ', 2))::bytea)
         GROUP BY 1, 2
     ),
     
@@ -20,8 +28,8 @@ WITH swaps AS (
             address,  
             name
         FROM labels.labels
-        WHERE "type" = 'balancer_source'
-        AND "author" = 'balancerlabs'
+        WHERE "type" = ' balancer_source '
+        AND "author" = ' balancerlabs '
     ),
     
     arb_bots AS (
@@ -29,8 +37,8 @@ WITH swaps AS (
             address,  
             name
         FROM labels.labels
-        WHERE "name" = 'arbitrage bot'
-        AND "author" = 'balancerlabs'
+        WHERE "name" = ' arbitrage bot '
+        AND "author" = ' balancerlabs '
         AND address NOT IN (SELECT address from manual_labels)
     ),
     
@@ -46,12 +54,12 @@ WITH swaps AS (
     
     trade_count AS (
         SELECT
-            date_trunc('day', block_time) AS day,
+            date_trunc(' DAY ', block_time) AS day,
             tx_to AS channel,
             COUNT(1) AS daily_trades
         FROM dex.trades
-        WHERE trader_a != '\x0000000000000000000000000000000000000000'
-        AND project = 'Balancer'
+        WHERE trader_a != ' \ x0000000000000000000000000000000000000000 '
+        AND project = ' Balancer '
         GROUP BY 1,2
         ),
         
@@ -65,10 +73,10 @@ WITH swaps AS (
     channel_classifier AS (
         SELECT c.channel, l.name,
             CASE WHEN l.name IS NOT NULL THEN l.name
-            WHEN f.pool IS NOT NULL THEN 'BPool direct'
-            WHEN c.channel IN (SELECT channel FROM heavy_traders) THEN 'heavy trader'
-            WHEN c.channel IN (select channel from channels where volume is not null order by volume desc limit 10) THEN CONCAT(SUBSTRING(concat('0x', encode(c.channel, 'hex')), 0, 13), '...')
-            ELSE 'others' END AS class
+            WHEN f.pool IS NOT NULL THEN ' BPool direct '
+            WHEN c.channel IN (SELECT channel FROM heavy_traders) THEN ' heavy trader '
+            WHEN c.channel IN (select channel from channels where volume is not null order by volume desc limit 10) THEN CONCAT(SUBSTRING(concat(' 0x ', encode(c.channel, ' hex ')), 0, 13), '...')
+            ELSE ' others ' END AS class
         FROM channels c
         LEFT JOIN balancer."BFactory_evt_LOG_NEW_POOL" f ON f.pool = c.channel
         LEFT JOIN distinct_labels l ON l.address = c.channel

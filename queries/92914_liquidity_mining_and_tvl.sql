@@ -1,40 +1,71 @@
 WITH labels AS (
-        SELECT * FROM (SELECT
-            address,
-            name,
-            ROW_NUMBER() OVER (PARTITION BY address ORDER BY MAX(updated_at) DESC) AS num
-        FROM labels.labels
-        WHERE "type" IN ('balancer_pool', 'balancer_v2_pool')
-        GROUP BY 1, 2) l
-        WHERE num = 1
-    ), 
-    
-    prices AS (
-        SELECT date_trunc('day', minute) AS day, contract_address AS token, AVG(price) AS price
-        FROM prices.usd
-        WHERE minute > '2021-04-20'
-        GROUP BY 1, 2
-    ),
-    
-    calendar AS (
-        SELECT generate_series('2020/06/01'::timestamptz, now(), '1 day'::interval) AS day
-    ),
-    
-    mainnet_rewards AS (
-        SELECT date_trunc('week', day) AS week, SUM(amount) AS amount, SUM(usd_amount) AS usd_amount
-        FROM dune_user_generated.balancer_liquidity_mining
-        WHERE ('{{1. Pool ID}}' = 'All' OR pool_id = CONCAT('\', SUBSTRING('{{1. Pool ID}}', 2))::bytea)
-        AND chain_id = '1'
+    SELECT
+        *
+    FROM
+        (
+            SELECT
+                address,
+                name,
+                ROW_NUMBER() OVER (
+                    PARTITION BY address
+                    ORDER BY
+                        MAX(updated_at) DESC
+                ) AS num
+            FROM
+                labels.labels
+            WHERE
+                "type" IN ('balancer_pool', 'balancer_v2_pool')
+            GROUP BY
+                1,
+                2
+        ) l
+    WHERE
+        num = 1
+),
+prices AS (
+    SELECT
+        date_trunc('day', MINUTE) AS DAY,
+        contract_address AS token,
+        AVG(price) AS price
+    FROM
+        prices.usd
+    WHERE
+        MINUTE > '2021-04-20'
+    GROUP BY
+        1,
+        2
+),
+calendar AS (
+    SELECT
+        generate_series(
+            '2020/06/01' :: timestamptz,
+            NOW(),
+            '1 day' :: INTERVAL
+        ) AS DAY
+),
+mainnet_rewards AS (
+    SELECT
+        date_trunc('week', DAY) AS week,
+        SUM(amount) AS amount,
+        SUM(usd_amount) AS usd_amount
+    FROM
+        dune_user_generated.balancer_liquidity_mining
+    WHERE
+        (
+            '{{1. Pool ID}}' = 'All'
+            OR pool_id = CONCAT(
+                '\', SUBSTRING(' { { 1.Pool ID } } ', 2))::bytea)
+        AND chain_id = ' 1 '
         GROUP BY 1
     ),
     
     dex_prices_1 AS (
-        SELECT date_trunc('day', hour) AS day, 
+        SELECT date_trunc(' DAY ', hour) AS day, 
         contract_address AS token, 
         (PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY median_price)) AS price,
         SUM(sample_size) as sample_size
         FROM dex.view_token_prices
-        WHERE hour > '2021-04-20'
+        WHERE hour > ' 2021 -04 -20 '
         GROUP BY 1, 2
         HAVING sum(sample_size) > 3
     ),
@@ -46,27 +77,27 @@ WITH labels AS (
     
     swaps_changes AS (
         SELECT day, pool, token, SUM(COALESCE(delta, 0)) AS delta FROM (
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, "tokenIn" AS token, "amountIn" AS delta
+        SELECT date_trunc(' DAY ', evt_block_time) AS day, "poolId" AS pool, "tokenIn" AS token, "amountIn" AS delta
         FROM balancer_v2."Vault_evt_Swap"
         UNION ALL
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, "tokenOut" AS token, -"amountOut" AS delta
+        SELECT date_trunc(' DAY ', evt_block_time) AS day, "poolId" AS pool, "tokenOut" AS token, -"amountOut" AS delta
         FROM balancer_v2."Vault_evt_Swap") swaps
         GROUP BY 1, 2, 3
     ),
     
     internal_changes AS (
-        SELECT date_trunc('day', evt_block_time) AS day, '\xBA12222222228d8Ba445958a75a0704d566BF2C8'::bytea AS pool, token, SUM(COALESCE(delta, 0)) AS delta 
+        SELECT date_trunc(' DAY ', evt_block_time) AS day, ' \ xBA12222222228d8Ba445958a75a0704d566BF2C8 '::bytea AS pool, token, SUM(COALESCE(delta, 0)) AS delta 
         FROM balancer_v2."Vault_evt_InternalBalanceChanged"
         GROUP BY 1, 2, 3
     ),
     
     balances_changes AS (
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, UNNEST(tokens) AS token, UNNEST(deltas) AS delta 
+        SELECT date_trunc(' DAY ', evt_block_time) AS day, "poolId" AS pool, UNNEST(tokens) AS token, UNNEST(deltas) AS delta 
         FROM balancer_v2."Vault_evt_PoolBalanceChanged"
     ),
     
     managed_changes AS (
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, token, "managedDelta" AS delta
+        SELECT date_trunc(' DAY ', evt_block_time) AS day, "poolId" AS pool, token, "managedDelta" AS delta
         FROM balancer_v2."Vault_evt_PoolBalanceManaged"
     ),
     
@@ -86,8 +117,8 @@ WITH labels AS (
             SELECT day, pool, token, delta AS amount 
             FROM managed_changes
             ) balance
-        WHERE ('{{1. Pool ID}}' = 'All' OR
-        pool = CONCAT('\', SUBSTRING('{{1. Pool ID}}', 2))::bytea)
+        WHERE (' { { 1.Pool ID } } ' = ' ALL ' OR
+        pool = CONCAT(' \ ', SUBSTRING(' { { 1.Pool ID } } ', 2))::bytea)
         GROUP BY 1, 2, 3
     ),
     
@@ -130,7 +161,7 @@ WITH labels AS (
     ),
 
     total_tvl AS (
-        SELECT date_trunc('week', day) AS week, AVG(liquidity) AS tvl
+        SELECT date_trunc(' week ', day) AS week, AVG(liquidity) AS tvl
         FROM estimated_pool_liquidity
         GROUP BY 1
     )
@@ -139,6 +170,7 @@ SELECT t.week, COALESCE(amount::int, 0) AS amount, t.tvl, t.tvl/r.usd_amount AS 
 FROM total_tvl t
 LEFT JOIN mainnet_rewards r ON r.week = t.week
 WHERE tvl IS NOT NULL
-AND t.week >= '{{2. Start date}}'
-AND t.week <= '{{3. End date}}'
+AND t.week >= ' { { 2.START date } } '
+AND t.week <= ' { { 3.
+            END date } } '
 ORDER BY 1

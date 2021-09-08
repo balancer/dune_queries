@@ -1,70 +1,151 @@
 WITH labels AS (
-        SELECT * FROM (SELECT
-            address,
-            name,
-            ROW_NUMBER() OVER (PARTITION BY address ORDER BY MAX(updated_at) DESC) AS num
-        FROM labels.labels
-        WHERE "type" = 'balancer_v2_pool'
-        GROUP BY 1, 2) l
-        WHERE num = 1
-    ), 
-
-    prices AS (
-        SELECT date_trunc('day', minute) AS day, contract_address AS token, AVG(price) AS price
-        FROM prices.usd
-        WHERE minute >= GREATEST('{{3. Start date}}', '2021-04-20'::timestamptz)
-        GROUP BY 1, 2
-    ),
-    
-    dex_prices_1 AS (
-        SELECT date_trunc('day', hour) AS day, 
-        contract_address AS token, 
-        (PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY median_price)) AS price,
-        SUM(sample_size) as sample_size
-        FROM dex.view_token_prices
-        WHERE hour >= GREATEST('{{3. Start date}}', '2021-04-20'::timestamptz)
-        GROUP BY 1, 2
-        HAVING sum(sample_size) > 2
-    ),
-    
-    dex_prices AS (
-        SELECT *, LEAD(day, 1, now()) OVER (PARTITION BY token ORDER BY day) AS day_of_next_change
-        FROM dex_prices_1
-    ),
-    
-    transfers AS (
-        SELECT * FROM balancer_v2."WeightedPool_evt_Transfer"
-        WHERE evt_block_time <= '{{4. End date}}'
-        UNION ALL
-        SELECT * FROM balancer_v2."StablePool_evt_Transfer"
-        WHERE evt_block_time <= '{{4. End date}}'
-    ),
-    
-    joins AS (
-        SELECT date_trunc('day', e.evt_block_time) AS day, "to" AS lp, contract_address AS pool, SUM(value)/1e18 AS amount
-        FROM transfers e
-        WHERE "from" IN ('\xBA12222222228d8Ba445958a75a0704d566BF2C8',
-                        '\x0000000000000000000000000000000000000000')
-        GROUP BY 1, 2, 3
-    ),
-    
-    exits AS (
-        SELECT date_trunc('day', e.evt_block_time) AS day, "from" AS lp, contract_address AS pool, -SUM(value)/1e18 AS amount
-        FROM transfers e
-        WHERE "to" IN ('\xBA12222222228d8Ba445958a75a0704d566BF2C8',
-                        '\x0000000000000000000000000000000000000000')
-        GROUP BY 1, 2, 3
-    ),
-    
-    daily_delta_bpt_by_pool AS (
-        SELECT day, lp, pool, SUM(COALESCE(amount, 0)) as amount FROM 
-        (SELECT *
-        FROM joins j 
-        UNION ALL
-        SELECT * 
-        FROM exits e) foo
-        WHERE ('{{2. Pool ID}}' = 'All'
-        OR SUBSTRING(REGEXP_REPLACE('{{2. Pool ID}}', '^.', '\'),0,43)::bytea = pool)
+    SELECT
+        *
+    FROM
+        (
+            SELECT
+                address,
+                name,
+                ROW_NUMBER() OVER (
+                    PARTITION BY address
+                    ORDER BY
+                        MAX(updated_at) DESC
+                ) AS num
+            FROM
+                labels.labels
+            WHERE
+                "type" = 'balancer_v2_pool'
+            GROUP BY
+                1,
+                2
+        ) l
+    WHERE
+        num = 1
+),
+prices AS (
+    SELECT
+        date_trunc('day', MINUTE) AS DAY,
+        contract_address AS token,
+        AVG(price) AS price
+    FROM
+        prices.usd
+    WHERE
+        MINUTE >= GREATEST('{{3. Start date}}', '2021-04-20' :: timestamptz)
+    GROUP BY
+        1,
+        2
+),
+dex_prices_1 AS (
+    SELECT
+        date_trunc('day', HOUR) AS DAY,
+        contract_address AS token,
+        (
+            PERCENTILE_DISC(0.5) WITHIN GROUP (
+                ORDER BY
+                    median_price
+            )
+        ) AS price,
+        SUM(sample_size) AS sample_size
+    FROM
+        dex.view_token_prices
+    WHERE
+        HOUR >= GREATEST('{{3. Start date}}', '2021-04-20' :: timestamptz)
+    GROUP BY
+        1,
+        2
+    HAVING
+        sum(sample_size) > 2
+),
+dex_prices AS (
+    SELECT
+        *,
+        LEAD(DAY, 1, NOW()) OVER (
+            PARTITION BY token
+            ORDER BY
+                DAY
+        ) AS day_of_next_change
+    FROM
+        dex_prices_1
+),
+transfers AS (
+    SELECT
+        *
+    FROM
+        balancer_v2."WeightedPool_evt_Transfer"
+    WHERE
+        evt_block_time <= '{{4. End date}}'
+    UNION
+    ALL
+    SELECT
+        *
+    FROM
+        balancer_v2."StablePool_evt_Transfer"
+    WHERE
+        evt_block_time <= '{{4. End date}}'
+),
+joins AS (
+    SELECT
+        date_trunc('day', e.evt_block_time) AS DAY,
+        "to" AS lp,
+        contract_address AS pool,
+        SUM(value) / 1e18 AS amount
+    FROM
+        transfers e
+    WHERE
+        "from" IN (
+            '\xBA12222222228d8Ba445958a75a0704d566BF2C8',
+            '\x0000000000000000000000000000000000000000'
+        )
+    GROUP BY
+        1,
+        2,
+        3
+),
+exits AS (
+    SELECT
+        date_trunc('day', e.evt_block_time) AS DAY,
+        "from" AS lp,
+        contract_address AS pool,
+        - SUM(value) / 1e18 AS amount
+    FROM
+        transfers e
+    WHERE
+        "to" IN (
+            '\xBA12222222228d8Ba445958a75a0704d566BF2C8',
+            '\x0000000000000000000000000000000000000000'
+        )
+    GROUP BY
+        1,
+        2,
+        3
+),
+daily_delta_bpt_by_pool AS (
+    SELECT
+        DAY,
+        lp,
+        pool,
+        SUM(COALESCE(amount, 0)) AS amount
+    FROM
+        (
+            SELECT
+                *
+            FROM
+                joins j
+            UNION
+            ALL
+            SELECT
+                *
+            FROM
+                exits e
+        ) foo
+    WHERE
+        (
+            '{{2. Pool ID}}' = 'All'
+            OR SUBSTRING(
+                REGEXP_REPLACE(
+                    '{{2. Pool ID}}',
+                    '^.',
+                    '\'),0,43)::bytea = pool)
         GROUP BY 1, 2, 3
     ),
     
@@ -80,7 +161,7 @@ WITH labels AS (
     ),
     
    calendar AS (
-        SELECT generate_series(MIN(day), CURRENT_DATE, '1 day'::interval) AS day
+        SELECT generate_series(MIN(day), CURRENT_DATE, ' 1 DAY '::interval) AS day
         FROM cumulative_bpt_by_pool
     ),
     
@@ -124,16 +205,17 @@ WITH labels AS (
             FROM balancer_v2."StablePool_evt_SwapFeePercentageChanged"
             WHERE evt_block_time <= t.block_time
             AND contract_address = SUBSTRING(exchange_contract_address, 0, 21))
-        WHERE project = 'Balancer'
-        AND block_time <= '{{4. End date}}'
-        AND version = '2'
-        AND ('{{2. Pool ID}}' = 'All'
-        OR REGEXP_REPLACE('{{2. Pool ID}}', '^.', '\')::bytea = exchange_contract_address)
+        WHERE project = ' Balancer '
+        AND block_time <= ' { { 4.
+                END date } } '
+        AND version = ' 2 '
+        AND (' { { 2.Pool ID } } ' = ' ALL '
+        OR REGEXP_REPLACE(' { { 2.Pool ID } } ', ' ^.', ' \ ')::bytea = exchange_contract_address)
     ),
     
     revenues AS (
         SELECT
-            date_trunc('day', block_time) AS day,
+            date_trunc(' DAY ', block_time) AS day,
             pool,
             token_b_address,
             SUM(token_b_amount * swap_fee) AS revenues
@@ -145,7 +227,7 @@ WITH labels AS (
         SELECT 
             s.day, 
             s.pool,
-            CONCAT(SUBSTRING(UPPER(name), 0, 15), ' (', SUBSTRING(s.pool, 3, 8), ')') AS label,
+            CONCAT(SUBSTRING(UPPER(name), 0, 15), ' (', SUBSTRING(s.pool, 3, 8), ') ') AS label,
             lp,
             token_b_address,
             (revenues * share * COALESCE(p1.price, p2.price)) AS revenues
@@ -162,9 +244,10 @@ cumulative_revenues AS (
         SUM(revenues) AS revenues,
         SUM(SUM(revenues)) OVER (ORDER BY day) AS cumulative_revenues
     FROM lp_revenues
-    WHERE ('{{1. LP address}}' = 'All'
-    OR REGEXP_REPLACE('{{1. LP address}}', '^.', '\')::bytea = lp)
+    WHERE (' { { 1.LP address } } ' = ' ALL '
+    OR REGEXP_REPLACE(' { { 1.LP address } } ', ' ^.', ' \ ')::bytea = lp)
     GROUP BY 1
 )
 
-SELECT * FROM cumulative_revenues WHERE day >= '{{3. Start date}}' AND day <= '{{4. End date}}'
+SELECT * FROM cumulative_revenues WHERE day >= ' { { 3.START date } } ' AND day <= ' { { 4.
+            END date } } '

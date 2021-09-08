@@ -1,57 +1,110 @@
 WITH prices AS (
-        SELECT date_trunc('day', minute) AS day, contract_address AS token, AVG(price) AS price
-        FROM prices.usd
-        WHERE minute > '2021-04-20'
-        GROUP BY 1, 2
-    ),
-    
-    dex_prices_1 AS (
-        SELECT date_trunc('day', hour) AS day, 
-        contract_address AS token, 
-        (PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY median_price)) AS price,
-        SUM(sample_size) as sample_size
-        FROM dex.view_token_prices
-        WHERE hour > '2021-04-20'
-        GROUP BY 1, 2
-        HAVING sum(sample_size) > 2
-    ),
-    
-    dex_prices AS (
-        SELECT *, LEAD(day, 1, now()) OVER (PARTITION BY token ORDER BY day) AS day_of_next_change
-        FROM dex_prices_1
-    ),
-    
-    events_v2 AS (
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, "tokenIn" AS token, "amountIn" AS delta
-        FROM balancer_v2."Vault_evt_Swap"
-        
-        UNION ALL
-        
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, "tokenOut" AS token, -"amountOut" AS delta
-        FROM balancer_v2."Vault_evt_Swap"
-        
-        UNION ALL 
-        
-        SELECT date_trunc('day', evt_block_time) AS day, '\xBA12222222228d8Ba445958a75a0704d566BF2C8'::bytea AS pool, token, SUM(COALESCE(delta, 0)) AS delta 
-        FROM balancer_v2."Vault_evt_InternalBalanceChanged"
-        GROUP BY 1, 2, 3
-        
-        UNION ALL
-        
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, UNNEST(tokens) AS token, UNNEST(deltas) AS delta 
-        FROM balancer_v2."Vault_evt_PoolBalanceChanged"
-        
-        UNION ALL 
-        
-        SELECT date_trunc('day', evt_block_time) AS day, "poolId" AS pool, token, "cashDelta" + "managedDelta" AS delta
-        FROM balancer_v2."Vault_evt_PoolBalanceManaged"
-    
-    ),
-    
-    daily_delta_balance AS (
-        SELECT day, pool, token, SUM(COALESCE(delta, 0)) AS amount 
-        FROM events_v2
-        WHERE ('{{1. Pool ID}}' = 'All' OR pool= CONCAT('\', SUBSTRING('{{1. Pool ID}}', 2))::bytea)
+    SELECT
+        date_trunc('day', MINUTE) AS DAY,
+        contract_address AS token,
+        AVG(price) AS price
+    FROM
+        prices.usd
+    WHERE
+        MINUTE > '2021-04-20'
+    GROUP BY
+        1,
+        2
+),
+dex_prices_1 AS (
+    SELECT
+        date_trunc('day', HOUR) AS DAY,
+        contract_address AS token,
+        (
+            PERCENTILE_DISC(0.5) WITHIN GROUP (
+                ORDER BY
+                    median_price
+            )
+        ) AS price,
+        SUM(sample_size) AS sample_size
+    FROM
+        dex.view_token_prices
+    WHERE
+        HOUR > '2021-04-20'
+    GROUP BY
+        1,
+        2
+    HAVING
+        sum(sample_size) > 2
+),
+dex_prices AS (
+    SELECT
+        *,
+        LEAD(DAY, 1, NOW()) OVER (
+            PARTITION BY token
+            ORDER BY
+                DAY
+        ) AS day_of_next_change
+    FROM
+        dex_prices_1
+),
+events_v2 AS (
+    SELECT
+        date_trunc('day', evt_block_time) AS DAY,
+        "poolId" AS pool,
+        "tokenIn" AS token,
+        "amountIn" AS delta
+    FROM
+        balancer_v2."Vault_evt_Swap"
+    UNION
+    ALL
+    SELECT
+        date_trunc('day', evt_block_time) AS DAY,
+        "poolId" AS pool,
+        "tokenOut" AS token,
+        - "amountOut" AS delta
+    FROM
+        balancer_v2."Vault_evt_Swap"
+    UNION
+    ALL
+    SELECT
+        date_trunc('day', evt_block_time) AS DAY,
+        '\xBA12222222228d8Ba445958a75a0704d566BF2C8' :: bytea AS pool,
+        token,
+        SUM(COALESCE(delta, 0)) AS delta
+    FROM
+        balancer_v2."Vault_evt_InternalBalanceChanged"
+    GROUP BY
+        1,
+        2,
+        3
+    UNION
+    ALL
+    SELECT
+        date_trunc('day', evt_block_time) AS DAY,
+        "poolId" AS pool,
+        UNNEST(tokens) AS token,
+        UNNEST(deltas) AS delta
+    FROM
+        balancer_v2."Vault_evt_PoolBalanceChanged"
+    UNION
+    ALL
+    SELECT
+        date_trunc('day', evt_block_time) AS DAY,
+        "poolId" AS pool,
+        token,
+        "cashDelta" + "managedDelta" AS delta
+    FROM
+        balancer_v2."Vault_evt_PoolBalanceManaged"
+),
+daily_delta_balance AS (
+    SELECT
+        DAY,
+        pool,
+        token,
+        SUM(COALESCE(delta, 0)) AS amount
+    FROM
+        events_v2
+    WHERE
+        (
+            '{{1. Pool ID}}' = 'All'
+            OR pool = CONCAT(
+                '\', SUBSTRING(' { { 1.Pool ID } } ', 2))::bytea)
         GROUP BY 1, 2, 3
     ),
     
@@ -66,7 +119,7 @@ WITH prices AS (
     ),
     
     calendar AS (
-        SELECT generate_series('2021-04-21'::timestamp, CURRENT_DATE, '1 day'::interval) AS day
+        SELECT generate_series(' 2021 -04 -21 '::timestamp, CURRENT_DATE, ' 1 DAY '::interval) AS day
     ),
     
     cumulative_usd_balance AS (
@@ -92,19 +145,19 @@ WITH prices AS (
     volume AS (
         SELECT
             version,
-            date_trunc('day', block_time) AS day,
+            date_trunc(' DAY ', block_time) AS day,
             SUM(usd_amount) AS volume
         FROM dex.trades
-        WHERE project = 'Balancer' AND version = '2'
-        AND date_trunc('day', block_time) > date_trunc('day', CURRENT_DATE - '1 week'::interval)
-        AND ('{{1. Pool ID}}' = 'All' OR exchange_contract_address = CONCAT('\', SUBSTRING('{{1. Pool ID}}', 2))::bytea)
+        WHERE project = ' Balancer ' AND version = ' 2 '
+        AND date_trunc(' DAY ', block_time) > date_trunc(' DAY ', CURRENT_DATE - ' 1 week '::interval)
+        AND (' { { 1.Pool ID } } ' = ' ALL ' OR exchange_contract_address = CONCAT(' \ ', SUBSTRING(' { { 1.Pool ID } } ', 2))::bytea)
         GROUP BY 1, 2
     ),
     
     liquidity AS (
-        SELECT '2' AS version, day, SUM(liquidity) AS liquidity
+        SELECT ' 2 ' AS version, day, SUM(liquidity) AS liquidity
         FROM estimated_pool_liquidity
-        WHERE date_trunc('day', day) > date_trunc('day', CURRENT_DATE - '1 week'::interval)
+        WHERE date_trunc(' DAY ', day) > date_trunc(' DAY ', CURRENT_DATE - ' 1 week '::interval)
         GROUP BY 1, 2
     ),
     

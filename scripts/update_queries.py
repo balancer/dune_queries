@@ -11,8 +11,9 @@ queries = response.json()['data']['queries']
 for query in queries:
     uid = str(query['id'])
     name = query['name'].lower().replace('balancer', '').strip()
-    name = re.sub(r'[.,()%]', '', name)
-    name = re.sub(r'[\s/-]', '_', name)
+    name = re.sub(r'[.,()%-]', '', name)
+    name = re.sub(r'\s+', ' ', name)
+    name = re.sub(r'[\s/]', '_', name)
     filename = uid + '_' + name
     sql_code = query['query']
 
